@@ -58,7 +58,7 @@ http://localhost:4200
 
 ## Uso del Script ng-docker
 
-### Crear proyecto nuevo
+### Crear proyecto nuevo (Angular CLI)
 
 ```bash
 # Sintaxis: ng-docker new <nombre> <version>
@@ -66,6 +66,23 @@ ng-docker new mi-app 21        # Angular 21 (LTS actual)
 ng-docker new legacy-app 8     # Angular 8
 ng-docker new otro-proyecto 17 # Angular 17
 ```
+
+### Crear proyecto con Vite (más ligero)
+
+```bash
+# Sintaxis: ng-docker vite <nombre>
+ng-docker vite mi-app
+```
+
+Esto crea un proyecto Angular usando el template oficial de Vite (`npm create vite@latest` con `angular-ts`). Es más ligero y rápido que Angular CLI.
+
+| Característica | `ng-docker new` | `ng-docker vite` |
+|----------------|-----------------|------------------|
+| Puerto | 4200 | 5173 |
+| Bundler | Webpack/esbuild | Vite |
+| Setup | Completo | Mínimo |
+| Angular CLI | Sí | No |
+| Tamaño | Mayor | Menor |
 
 ### Dockerizar proyecto existente
 
