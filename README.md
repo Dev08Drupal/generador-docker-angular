@@ -122,6 +122,7 @@ PORT=4202 make start
 | `make down` | Detiene el contenedor |
 | `make logs` | Muestra logs en tiempo real |
 | `make shell` | Accede al shell del contenedor |
+| `make share` | Comparte localhost con URL pública |
 
 ### Angular CLI
 
@@ -196,9 +197,59 @@ mi-proyecto/
 └── angular.json
 ```
 
+## Compartir tu localhost (Cloudflare Tunnel)
+
+Comparte tu proyecto local con cualquier persona en segundos, con una URL pública HTTPS. Sin registro ni costo.
+
+`cloudflared` viene incluido en el contenedor Docker, no necesitas instalar nada adicional.
+
+### Uso
+
+```bash
+# Asegúrate de tener el proyecto corriendo
+make start
+
+# En otra terminal, comparte tu localhost
+make share
+```
+
+Obtendrás una URL como `https://random-name.trycloudflare.com` que puedes compartir.
+
+### Compartir en puerto diferente
+
+```bash
+# Si tu proyecto corre en otro puerto
+make share port=4201
+```
+
+### Configuración de allowedHosts
+
+Los proyectos creados con `ng-docker` ya vienen configurados para funcionar con Cloudflare Tunnel.
+
+Si tienes un proyecto existente y ves el error `"Blocked request. This host is not allowed"`, agrega esta configuración en tu `angular.json`:
+
+```json
+{
+  "serve": {
+    "builder": "@angular/build:dev-server",
+    "options": {
+      "allowedHosts": [".trycloudflare.com"]
+    }
+  }
+}
+```
+
+Luego reinicia el contenedor:
+
+```bash
+make down
+make start
+```
+
 ## Notas
 
 - Hot reload funciona automáticamente
 - `node_modules` vive en volumen Docker (mejor rendimiento)
 - No necesitas Node.js instalado en WSL2
 - Cada proyecto es independiente con su propia versión
+- Usa `make share` para compartir tu localhost con una URL pública

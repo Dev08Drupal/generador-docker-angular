@@ -169,4 +169,10 @@ rebuild: down build up ## Reconstruye completamente el contenedor
 .PHONY: fresh
 fresh: clean rebuild ## Limpieza completa y reconstrucción
 
+.PHONY: share
+share: ## Comparte localhost con URL pública (uso: make share port=4200)
+	@echo '$(GREEN)Iniciando túnel Cloudflare...$(RESET)'
+	@echo '$(YELLOW)Presiona Ctrl+C para detener$(RESET)'
+	@$(DOCKER_COMPOSE) exec $(SERVICE_NAME) cloudflared tunnel --url http://localhost:$(or $(port),4200)
+
 .DEFAULT_GOAL := help

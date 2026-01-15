@@ -28,6 +28,17 @@ get_node_version() {
     esac
 }
 
+# Función para configurar allowedHosts en angular.json (para Cloudflare Tunnel)
+configure_allowed_hosts() {
+    local PROJECT_PATH="$1"
+    local ANGULAR_JSON="$PROJECT_PATH/angular.json"
+
+    if [ -f "$ANGULAR_JSON" ]; then
+        # Usar sed para insertar allowedHosts después de "builder": "@angular/build:dev-server"
+        sed -i '/"builder": "@angular\/build:dev-server"/a\          "options": {\n            "allowedHosts": [".trycloudflare.com"]\n          },' "$ANGULAR_JSON"
+    fi
+}
+
 # Función para generar archivos Docker
 generate_docker_files() {
     local PROJECT_PATH="$1"
@@ -41,6 +52,12 @@ generate_docker_files() {
     cat > "$PROJECT_PATH/Dockerfile" << EOF
 # Dockerfile - Angular $ANGULAR_VERSION
 FROM node:$NODE_VERSION-alpine
+
+# Instalar cloudflared para compartir localhost
+RUN apk add --no-cache curl && \\
+    curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && \\
+    chmod +x /usr/local/bin/cloudflared && \\
+    apk del curl
 
 RUN npm install -g @angular/cli@$ANGULAR_VERSION
 
@@ -86,7 +103,7 @@ EOF
 
     # Makefile
     cat > "$PROJECT_PATH/Makefile" << 'MAKEFILE'
-.PHONY: start up down logs shell ng npm build-prod test help
+.PHONY: start up down logs shell ng npm build-prod test share help
 
 start: ## Construye y levanta el contenedor
 	docker-compose up -d --build
@@ -115,6 +132,10 @@ build-prod: ## Build de producción
 
 test: ## Ejecuta tests
 	docker-compose exec app ng test
+
+share: ## Comparte localhost con URL pública
+	@echo "Iniciando túnel Cloudflare..."
+	docker-compose exec app cloudflared tunnel --url http://localhost:4200
 
 help: ## Muestra ayuda
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "%-12s %s\n", $$1, $$2}'
@@ -145,10 +166,15 @@ if [ "$1" = "new" ]; then
         --user "$(id -u):$(id -g)" \
         -e HOME=/tmp \
         -e NPM_CONFIG_PREFIX=/tmp/.npm-global \
+        -e NPM_CONFIG_FUND=false \
+        -e NPM_CONFIG_UPDATE_NOTIFIER=false \
         -v "$(pwd)":/workspace \
         -w /workspace \
         "node:$NODE_VERSION-alpine" \
-        sh -c "npm install -g @angular/cli@$ANGULAR_VERSION && /tmp/.npm-global/bin/ng new $PROJECT_NAME --skip-git"
+        sh -c "npm install -g @angular/cli@$ANGULAR_VERSION 2>/dev/null && /tmp/.npm-global/bin/ng new $PROJECT_NAME --skip-git"
+
+    # Configurar allowedHosts para Cloudflare Tunnel
+    configure_allowed_hosts "$(pwd)/$PROJECT_NAME"
 
     generate_docker_files "$(pwd)/$PROJECT_NAME" "$ANGULAR_VERSION"
 
