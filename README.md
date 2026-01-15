@@ -67,22 +67,23 @@ ng-docker new legacy-app 8     # Angular 8
 ng-docker new otro-proyecto 17 # Angular 17
 ```
 
-### Crear proyecto con Vite (más ligero)
+### Crear proyecto con Vite (interactivo)
 
 ```bash
 # Sintaxis: ng-docker vite <nombre>
 ng-docker vite mi-app
 ```
 
-Esto crea un proyecto Angular usando el template oficial de Vite (`npm create vite@latest` con `angular-ts`). Es más ligero y rápido que Angular CLI.
+Esto ejecuta `npm create vite@latest` de forma interactiva. Podrás elegir:
+- **Framework**: Vanilla, Vue, React, Svelte, etc.
+- **Variante**: JavaScript o TypeScript
 
 | Característica | `ng-docker new` | `ng-docker vite` |
 |----------------|-----------------|------------------|
 | Puerto | 4200 | 5173 |
-| Bundler | Webpack/esbuild | Vite |
+| Bundler | esbuild | Vite |
+| Framework | Angular | Cualquiera |
 | Setup | Completo | Mínimo |
-| Angular CLI | Sí | No |
-| Tamaño | Mayor | Menor |
 
 ### Dockerizar proyecto existente
 

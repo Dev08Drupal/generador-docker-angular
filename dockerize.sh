@@ -243,7 +243,7 @@ MAKEFILE
     echo -e "${GREEN}Archivos generados en: $PROJECT_PATH${NC}"
 }
 
-# Comando: vite (crear proyecto con Vite + Angular)
+# Comando: vite (crear proyecto con Vite - interactivo)
 if [ "$1" = "vite" ]; then
     PROJECT_NAME="${2:-}"
 
@@ -254,7 +254,9 @@ if [ "$1" = "vite" ]; then
         exit 1
     fi
 
-    echo -e "${GREEN}Creando proyecto Angular con Vite...${NC}"
+    echo -e "${GREEN}Creando proyecto con Vite...${NC}"
+    echo -e "${YELLOW}Selecciona el framework y variante cuando se te pregunte${NC}"
+    echo ""
 
     docker run --rm -it \
         --user "$(id -u):$(id -g)" \
@@ -264,12 +266,12 @@ if [ "$1" = "vite" ]; then
         -v "$(pwd)":/workspace \
         -w /workspace \
         node:22-alpine \
-        sh -c "npm create vite@latest $PROJECT_NAME -- --template angular-ts 2>/dev/null"
+        sh -c "npm create vite@latest $PROJECT_NAME"
 
     generate_vite_docker_files "$(pwd)/$PROJECT_NAME"
 
     echo ""
-    echo -e "${YELLOW}Proyecto Vite + Angular creado. Para iniciar:${NC}"
+    echo -e "${YELLOW}Proyecto Vite creado. Para iniciar:${NC}"
     echo "  cd $PROJECT_NAME"
     echo "  make start"
     echo ""
