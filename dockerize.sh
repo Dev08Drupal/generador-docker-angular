@@ -49,20 +49,33 @@ generate_vite_docker_files() {
 
     # Dockerfile
     cat > "$PROJECT_PATH/Dockerfile" << 'EOF'
-FROM node:22-alpine
+FROM node:22-slim
 
 # Instalar cloudflared para compartir localhost
-RUN apk add --no-cache curl && \
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
     curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && \
     chmod +x /usr/local/bin/cloudflared && \
-    apk del curl
+    apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+# Crear usuario con UID/GID configurables (por defecto 1000)
+ARG UID=1000
+ARG GID=1000
+
+RUN if [ "$GID" != "1000" ]; then groupmod -g $GID node 2>/dev/null || true; fi && \
+    if [ "$UID" != "1000" ]; then usermod -u $UID node 2>/dev/null || true; fi
 
 WORKDIR /app
+
+# Cambiar propietario del directorio de trabajo
+RUN chown -R node:node /app
 
 COPY package*.json ./
 RUN npm install
 
 COPY . .
+
+# Usar el usuario node en lugar de root
+USER node
 
 EXPOSE 5173
 
@@ -73,13 +86,17 @@ EOF
     cat > "$PROJECT_PATH/docker-compose.yml" << EOF
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        UID: \${UID:-1000}
+        GID: \${GID:-1000}
     container_name: ${PROJECT_NAME}
+    mem_limit: 4g
     ports:
       - "\${PORT:-5173}:5173"
     volumes:
       - .:/app
-      - /app/node_modules
     command: npm run dev -- --host 0.0.0.0
     stdin_open: true
     tty: true
@@ -87,7 +104,7 @@ EOF
 
     # .dockerignore
     cat > "$PROJECT_PATH/.dockerignore" << 'EOF'
-node_modules
+# node_modules  # Comentado para usar node_modules del repo local
 dist
 .git
 .vscode
@@ -96,7 +113,7 @@ EOF
 
     # Makefile
     cat > "$PROJECT_PATH/Makefile" << 'MAKEFILE'
-.PHONY: start up down logs shell npm build test share help
+.PHONY: start up down logs shell npm npm-install build test share help
 
 start: ## Construye y levanta el contenedor
 	docker-compose up -d --build
@@ -116,6 +133,11 @@ shell: ## Accede al shell
 
 npm: ## Ejecuta npm (uso: make npm cmd="install axios")
 	docker-compose exec app npm $(cmd)
+
+npm-install: ## Instala dependencias en node_modules local
+	@echo "Instalando dependencias en node_modules local..."
+	@docker-compose run --rm app npm install
+	@echo "Dependencias instaladas en ./node_modules"
 
 build: ## Build de producción
 	docker-compose exec app npm run build
@@ -148,22 +170,40 @@ generate_docker_files() {
     # Dockerfile
     cat > "$PROJECT_PATH/Dockerfile" << EOF
 # Dockerfile - Angular $ANGULAR_VERSION
-FROM node:$NODE_VERSION-alpine
+FROM node:$NODE_VERSION-slim
 
-# Instalar cloudflared para compartir localhost
-RUN apk add --no-cache curl && \\
+# Instalar Chromium para pruebas unitarias y cloudflared para tunnels
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    chromium \\
+    curl \\
+    ca-certificates && \\
     curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && \\
     chmod +x /usr/local/bin/cloudflared && \\
-    apk del curl
+    apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+ENV CHROME_BIN=/usr/bin/chromium
 
 RUN npm install -g @angular/cli@$ANGULAR_VERSION
 
+# Crear usuario con UID/GID configurables (por defecto 1000)
+ARG UID=1000
+ARG GID=1000
+
+RUN if [ "\$GID" != "1000" ]; then groupmod -g \$GID node 2>/dev/null || true; fi && \\
+    if [ "\$UID" != "1000" ]; then usermod -u \$UID node 2>/dev/null || true; fi
+
 WORKDIR /app
+
+# Cambiar propietario del directorio de trabajo
+RUN chown -R node:node /app
 
 COPY package*.json ./
 RUN npm install
 
 COPY . .
+
+# Usar el usuario node en lugar de root
+USER node
 
 EXPOSE 4200
 
@@ -174,13 +214,17 @@ EOF
     cat > "$PROJECT_PATH/docker-compose.yml" << EOF
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        UID: \${UID:-1000}
+        GID: \${GID:-1000}
     container_name: ${PROJECT_NAME}
+    mem_limit: 4g
     ports:
       - "\${PORT:-4200}:4200"
     volumes:
       - .:/app
-      - /app/node_modules
     environment:
       - NG_CLI_ANALYTICS=false
     command: ng serve --host 0.0.0.0 --poll 2000
@@ -190,17 +234,19 @@ EOF
 
     # .dockerignore
     cat > "$PROJECT_PATH/.dockerignore" << EOF
-node_modules
+# node_modules  # Comentado para usar node_modules del repo local
 dist
 .angular
 .git
 .vscode
 .idea
+coverage
+e2e
 EOF
 
     # Makefile
     cat > "$PROJECT_PATH/Makefile" << 'MAKEFILE'
-.PHONY: start up down logs shell ng npm build-prod test share help
+.PHONY: start up down logs shell ng npm npm-install build build-prod test test-headless share help
 
 start: ## Construye y levanta el contenedor
 	docker-compose up -d --build
@@ -208,6 +254,7 @@ start: ## Construye y levanta el contenedor
 
 up: ## Levanta el contenedor
 	docker-compose up -d
+	@echo "Aplicación disponible en: http://localhost:4200"
 
 down: ## Detiene el contenedor
 	docker-compose down
@@ -224,11 +271,22 @@ ng: ## Ejecuta ng (uso: make ng cmd="generate component home")
 npm: ## Ejecuta npm (uso: make npm cmd="install axios")
 	docker-compose exec app npm $(cmd)
 
+npm-install: ## Instala dependencias en node_modules local
+	@echo "Instalando dependencias en node_modules local..."
+	@docker-compose run --rm app npm install
+	@echo "Dependencias instaladas en ./node_modules"
+
+build: ## Build de desarrollo
+	docker-compose exec app ng build
+
 build-prod: ## Build de producción
 	docker-compose exec app ng build --configuration production
 
-test: ## Ejecuta tests
-	docker-compose exec app ng test
+test: ## Ejecuta tests (watch mode, headless)
+	docker-compose exec app ng test --browsers=ChromeHeadless
+
+test-headless: ## Ejecuta tests una vez (CI mode, headless)
+	docker-compose run --rm app ng test --watch=false --browsers=ChromeHeadless
 
 share: ## Comparte localhost con URL pública
 	@echo "Iniciando túnel Cloudflare..."
@@ -265,7 +323,7 @@ if [ "$1" = "vite" ]; then
         -e NPM_CONFIG_UPDATE_NOTIFIER=false \
         -v "$(pwd)":/workspace \
         -w /workspace \
-        node:22-alpine \
+        node:22-slim \
         sh -c "npm create vite@latest $PROJECT_NAME"
 
     generate_vite_docker_files "$(pwd)/$PROJECT_NAME"
@@ -303,7 +361,7 @@ if [ "$1" = "new" ]; then
         -e NPM_CONFIG_UPDATE_NOTIFIER=false \
         -v "$(pwd)":/workspace \
         -w /workspace \
-        "node:$NODE_VERSION-alpine" \
+        "node:$NODE_VERSION-slim" \
         sh -c "npm install -g @angular/cli@$ANGULAR_VERSION 2>/dev/null && /tmp/.npm-global/bin/ng new $PROJECT_NAME --skip-git"
 
     # Configurar allowedHosts para Cloudflare Tunnel

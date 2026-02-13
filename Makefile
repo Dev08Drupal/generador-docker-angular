@@ -32,16 +32,16 @@ init: ## Inicializa en directorio actual (uso: make init v=19)
 # Función para obtener versión de Node según Angular
 # Angular 8: Node 12, Angular 17: Node 20, Angular 18-21: Node 22
 define get_node
-$(if $(filter 8 9 10,$(1)),node:12-alpine,$(if $(filter 11 12,$(1)),node:14-alpine,$(if $(filter 13 14 15,$(1)),node:16-alpine,$(if $(filter 16 17,$(1)),node:20-alpine,node:22-alpine))))
+$(if $(filter 8 9 10,$(1)),node:12-slim,$(if $(filter 11 12,$(1)),node:14-slim,$(if $(filter 13 14 15,$(1)),node:16-slim,$(if $(filter 16 17,$(1)),node:20-slim,node:22-slim))))
 endef
 
 .PHONY: setup-docker
 setup-docker: ## Genera archivos Docker para un proyecto existente (uso: make setup-docker name=mi-app v=17)
 	@echo '$(GREEN)Generando archivos Docker para $(name) con Angular $(v)...$(RESET)'
 	@mkdir -p $(name)
-	@echo '# Dockerfile\nFROM $(call get_node,$(v))\nRUN npm install -g @angular/cli@$(v)\nWORKDIR /app\nCOPY package*.json ./\nRUN npm install\nCOPY . .\nEXPOSE 4200\nCMD ["ng", "serve", "--host", "0.0.0.0", "--poll", "2000"]' > $(name)/Dockerfile
-	@echo 'services:\n  app:\n    build: .\n    container_name: $(name)\n    ports:\n      - "$${PORT:-4200}:4200"\n    volumes:\n      - .:/app\n      - /app/node_modules\n    environment:\n      - NG_CLI_ANALYTICS=false\n    command: ng serve --host 0.0.0.0 --poll 2000\n    stdin_open: true\n    tty: true' > $(name)/docker-compose.yml
-	@echo 'node_modules\ndist\n.angular\n.git' > $(name)/.dockerignore
+	@printf '# Dockerfile - Angular $(v)\nFROM $(call get_node,$(v))\n\n# Instalar Chromium para pruebas unitarias y cloudflared para tunnels\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n    chromium \\\n    curl \\\n    ca-certificates && \\\n    curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && \\\n    chmod +x /usr/local/bin/cloudflared && \\\n    apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*\n\nENV CHROME_BIN=/usr/bin/chromium\n\nRUN npm install -g @angular/cli@$(v)\n\n# Crear usuario con UID/GID configurables (por defecto 1000)\nARG UID=1000\nARG GID=1000\n\nRUN if [ "$$GID" != "1000" ]; then groupmod -g $$GID node 2>/dev/null || true; fi && \\\n    if [ "$$UID" != "1000" ]; then usermod -u $$UID node 2>/dev/null || true; fi\n\nWORKDIR /app\n\n# Cambiar propietario del directorio de trabajo\nRUN chown -R node:node /app\n\nCOPY package*.json ./\nRUN npm install\n\nCOPY . .\n\n# Usar el usuario node en lugar de root\nUSER node\n\nEXPOSE 4200\n\nCMD ["ng", "serve", "--host", "0.0.0.0", "--poll", "2000"]\n' > $(name)/Dockerfile
+	@printf 'services:\n  app:\n    build:\n      context: .\n      args:\n        UID: $${UID:-1000}\n        GID: $${GID:-1000}\n    container_name: $(name)\n    mem_limit: 4g\n    ports:\n      - "$${PORT:-4200}:4200"\n    volumes:\n      - .:/app\n    environment:\n      - NG_CLI_ANALYTICS=false\n    command: ng serve --host 0.0.0.0 --poll 2000\n    stdin_open: true\n    tty: true\n' > $(name)/docker-compose.yml
+	@printf '# node_modules  # Comentado para usar node_modules del repo local\ndist\n.angular\n.git\n.vscode\n.idea\ncoverage\ne2e\n' > $(name)/.dockerignore
 	@cp Makefile $(name)/Makefile 2>/dev/null || true
 
 .PHONY: build
@@ -118,8 +118,12 @@ directive: ## Crea una directiva (uso: make directive name=highlight)
 	$(DOCKER_COMPOSE) exec $(SERVICE_NAME) ng generate directive $(name)
 
 .PHONY: test
-test: ## Ejecuta los tests
-	$(DOCKER_COMPOSE) exec $(SERVICE_NAME) ng test
+test: ## Ejecuta tests (watch mode, headless)
+	$(DOCKER_COMPOSE) exec $(SERVICE_NAME) ng test --browsers=ChromeHeadless
+
+.PHONY: test-headless
+test-headless: ## Ejecuta tests una vez (CI mode, headless)
+	$(DOCKER_COMPOSE) run --rm $(SERVICE_NAME) ng test --watch=false --browsers=ChromeHeadless
 
 .PHONY: e2e
 e2e: ## Ejecuta tests e2e

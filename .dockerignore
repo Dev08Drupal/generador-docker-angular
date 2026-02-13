@@ -1,4 +1,4 @@
-node_modules
+# node_modules  # Comentado para usar node_modules del repo local
 dist
 .git
 .angular
@@ -8,3 +8,5 @@ npm-debug.log
 .DS_Store
 *.md
 .env
+coverage
+e2e

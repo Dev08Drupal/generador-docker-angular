@@ -101,6 +101,46 @@ El script genera automáticamente:
 - `.dockerignore`
 - `Makefile`
 
+## Características del Entorno Docker
+
+### Imagen base Debian Slim
+
+Se usa `node:XX-slim` (Debian) en lugar de Alpine para compatibilidad con Chromium y dependencias nativas.
+
+### Usuario no-root
+
+El contenedor ejecuta como usuario `node` en lugar de `root` para mayor seguridad. El UID/GID es configurable:
+
+```bash
+# Usar UID/GID personalizados (útil para evitar problemas de permisos)
+UID=1001 GID=1001 make start
+```
+
+### node_modules local
+
+Los `node_modules` se comparten entre el host y el contenedor mediante el volumen montado. Esto permite que tu IDE tenga acceso completo a las dependencias para autocompletado e IntelliSense.
+
+```bash
+# Instalar dependencias en node_modules local
+make npm-install
+```
+
+### Tests Headless con Chromium
+
+Chromium viene preinstalado en el contenedor para ejecutar tests unitarios en modo headless sin necesidad de un navegador gráfico.
+
+```bash
+# Tests en watch mode (headless)
+make test
+
+# Tests una sola vez - ideal para CI
+make test-headless
+```
+
+### Límite de memoria
+
+Cada contenedor tiene un límite de 4GB de RAM configurado por defecto en `docker-compose.yml`.
+
 ## Múltiples Proyectos Simultáneos
 
 Cada proyecto puede correr en un puerto diferente:
@@ -121,13 +161,13 @@ PORT=4202 make start
 
 ## Compatibilidad de Versiones
 
-| Angular | Node | Ejemplo |
-|---------|------|---------|
-| 8-10 | 12 | `ng-docker new app 8` |
-| 11-12 | 14 | `ng-docker new app 12` |
-| 13-15 | 16 | `ng-docker new app 15` |
-| 16-17 | 20 | `ng-docker new app 17` |
-| 18-21 | 22 | `ng-docker new app 21` |
+| Angular | Node | Imagen Base | Ejemplo |
+|---------|------|-------------|---------|
+| 8-10 | 12 | node:12-slim | `ng-docker new app 8` |
+| 11-12 | 14 | node:14-slim | `ng-docker new app 12` |
+| 13-15 | 16 | node:16-slim | `ng-docker new app 15` |
+| 16-17 | 20 | node:20-slim | `ng-docker new app 17` |
+| 18-21 | 22 | node:22-slim | `ng-docker new app 21` |
 
 ## Comandos Make (dentro del proyecto)
 
@@ -163,13 +203,18 @@ make npm cmd="install axios"
 
 # Instalar dev dependency
 make npm cmd="install -D prettier"
+
+# Instalar dependencias en node_modules local
+make npm-install
 ```
 
 ### Build y Test
 
 | Comando | Descripción |
 |---------|-------------|
-| `make test` | Ejecuta tests unitarios |
+| `make test` | Tests en watch mode (headless) |
+| `make test-headless` | Tests una sola vez (CI mode) |
+| `make build` | Build de desarrollo |
 | `make build-prod` | Build de producción |
 
 ## Ejemplo Completo
@@ -193,12 +238,13 @@ make ng cmd="generate service products"
 # 5. Instalar librerías
 make npm cmd="install @angular/material"
 
-# 6. Entrar al shell para comandos complejos
-make shell
-> ng add @angular/material
-> exit
+# 6. Ejecutar tests
+make test
 
-# 7. Detener
+# 7. Build de producción
+make build-prod
+
+# 8. Detener
 make down
 ```
 
@@ -206,7 +252,7 @@ make down
 
 ```
 mi-proyecto/
-├── Dockerfile          # Node + Angular CLI
+├── Dockerfile          # Node + Angular CLI + Chromium
 ├── docker-compose.yml  # Configuración del contenedor
 ├── Makefile           # Comandos simplificados
 ├── .dockerignore      # Exclusiones para Docker
@@ -267,7 +313,9 @@ make start
 ## Notas
 
 - Hot reload funciona automáticamente
-- `node_modules` vive en volumen Docker (mejor rendimiento)
+- `node_modules` se comparte con el host (autocompletado en IDE)
 - No necesitas Node.js instalado en WSL2
 - Cada proyecto es independiente con su propia versión
+- El contenedor ejecuta como usuario no-root por seguridad
+- Límite de 4GB de RAM por contenedor
 - Usa `make share` para compartir tu localhost con una URL pública
