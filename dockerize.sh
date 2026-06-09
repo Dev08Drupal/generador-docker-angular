@@ -3,12 +3,12 @@
 #
 # Uso:
 #   dockerize.sh /ruta/al/proyecto [version]  - Dockeriza proyecto existente
-#   dockerize.sh new nombre-proyecto version  - Crea proyecto nuevo con Angular CLI
+#   dockerize.sh new nombre-proyecto [version] - Crea proyecto nuevo con Angular CLI
 #   dockerize.sh vite nombre-proyecto         - Crea proyecto nuevo con Vite + Angular
 #
 # Instalación global (opcional):
 #   sudo ln -s $(pwd)/dockerize.sh /usr/local/bin/ng-docker
-#   Luego: ng-docker new mi-app 21
+#   Luego: ng-docker new mi-app
 
 set -e
 
@@ -18,38 +18,61 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m'
 
-# Función para obtener versión de Node según Angular
-get_node_version() {
-    case $1 in
-        8|9|10) echo "12" ;;
-        11|12) echo "14" ;;
-        13|14|15) echo "16" ;;
-        16|17) echo "20" ;;
-        *) echo "22" ;;
-    esac
+# Obtiene la versión mayor de Angular desde npm (requiere Docker)
+resolve_latest_angular_version() {
+    echo -e "${YELLOW}Consultando última versión de Angular CLI en npm...${NC}" >&2
+    local ver
+    ver=$(docker run --rm node:lts-slim npm view @angular/cli version 2>/dev/null | tr -d '\r' | tail -1)
+    if [ -z "$ver" ]; then
+        echo -e "${RED}No se pudo obtener la versión de Angular. Usando 20 por defecto.${NC}" >&2
+        echo "20"
+    else
+        # Extrae solo el major (ej: "20.1.2" → "20")
+        echo "$ver" | cut -d. -f1
+    fi
 }
 
-# Función para configurar allowedHosts en angular.json (para Cloudflare Tunnel)
+# Obtiene la versión de Node compatible con la versión mayor de Angular
+get_node_version() {
+    local major="$1"
+    if   [ "$major" -le 10 ] 2>/dev/null; then echo "12"
+    elif [ "$major" -le 12 ] 2>/dev/null; then echo "14"
+    elif [ "$major" -le 15 ] 2>/dev/null; then echo "16"
+    elif [ "$major" -le 17 ] 2>/dev/null; then echo "20"
+    elif [ "$major" -le 21 ] 2>/dev/null; then echo "22"
+    else
+        # Angular 22+ requiere Node 24+ (Node 22.x del registry no cumple el parche mínimo)
+        echo "24"
+    fi
+}
+
+# Detecta versión Angular desde package.json del proyecto
+detect_angular_version_from_package() {
+    local pkg="$1/package.json"
+    if [ -f "$pkg" ]; then
+        grep -o '"@angular/core": *"[^"]*"' "$pkg" | grep -oE '[0-9]+' | head -1
+    fi
+}
+
+# Configura allowedHosts en angular.json (para Cloudflare Tunnel)
 configure_allowed_hosts() {
     local PROJECT_PATH="$1"
     local ANGULAR_JSON="$PROJECT_PATH/angular.json"
 
     if [ -f "$ANGULAR_JSON" ]; then
-        # Usar sed para insertar allowedHosts después de "builder": "@angular/build:dev-server"
         sed -i '/"builder": "@angular\/build:dev-server"/a\          "options": {\n            "allowedHosts": [".trycloudflare.com"]\n          },' "$ANGULAR_JSON"
     fi
 }
 
-# Función para generar archivos Docker para Vite
+# Genera archivos Docker para proyectos Vite
 generate_vite_docker_files() {
     local PROJECT_PATH="$1"
     local PROJECT_NAME=$(basename "$PROJECT_PATH")
 
     echo -e "${GREEN}Generando archivos Docker para Vite...${NC}"
 
-    # Dockerfile
     cat > "$PROJECT_PATH/Dockerfile" << 'EOF'
-FROM node:22-slim
+FROM node:lts-slim
 
 # Instalar cloudflared para compartir localhost
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
@@ -57,7 +80,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     chmod +x /usr/local/bin/cloudflared && \
     apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 
-# Crear usuario con UID/GID configurables (por defecto 1000)
 ARG UID=1000
 ARG GID=1000
 
@@ -65,8 +87,6 @@ RUN if [ "$GID" != "1000" ]; then groupmod -g $GID node 2>/dev/null || true; fi 
     if [ "$UID" != "1000" ]; then usermod -u $UID node 2>/dev/null || true; fi
 
 WORKDIR /app
-
-# Cambiar propietario del directorio de trabajo
 RUN chown -R node:node /app
 
 COPY package*.json ./
@@ -74,7 +94,6 @@ RUN npm install
 
 COPY . .
 
-# Usar el usuario node en lugar de root
 USER node
 
 EXPOSE 5173
@@ -82,7 +101,6 @@ EXPOSE 5173
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 EOF
 
-    # docker-compose.yml
     cat > "$PROJECT_PATH/docker-compose.yml" << EOF
 services:
   app:
@@ -102,7 +120,6 @@ services:
     tty: true
 EOF
 
-    # .dockerignore
     cat > "$PROJECT_PATH/.dockerignore" << 'EOF'
 # node_modules  # Comentado para usar node_modules del repo local
 dist
@@ -111,7 +128,6 @@ dist
 .idea
 EOF
 
-    # Makefile
     cat > "$PROJECT_PATH/Makefile" << 'MAKEFILE'
 .PHONY: start up down logs shell npm npm-install build test share help
 
@@ -158,7 +174,7 @@ MAKEFILE
     echo -e "${GREEN}Archivos generados en: $PROJECT_PATH${NC}"
 }
 
-# Función para generar archivos Docker
+# Genera archivos Docker para proyectos Angular
 generate_docker_files() {
     local PROJECT_PATH="$1"
     local ANGULAR_VERSION="$2"
@@ -167,7 +183,6 @@ generate_docker_files() {
 
     echo -e "${GREEN}Generando archivos Docker (Angular $ANGULAR_VERSION, Node $NODE_VERSION)...${NC}"
 
-    # Dockerfile
     cat > "$PROJECT_PATH/Dockerfile" << EOF
 # Dockerfile - Angular $ANGULAR_VERSION
 FROM node:$NODE_VERSION-slim
@@ -185,7 +200,6 @@ ENV CHROME_BIN=/usr/bin/chromium
 
 RUN npm install -g @angular/cli@$ANGULAR_VERSION
 
-# Crear usuario con UID/GID configurables (por defecto 1000)
 ARG UID=1000
 ARG GID=1000
 
@@ -193,8 +207,6 @@ RUN if [ "\$GID" != "1000" ]; then groupmod -g \$GID node 2>/dev/null || true; f
     if [ "\$UID" != "1000" ]; then usermod -u \$UID node 2>/dev/null || true; fi
 
 WORKDIR /app
-
-# Cambiar propietario del directorio de trabajo
 RUN chown -R node:node /app
 
 COPY package*.json ./
@@ -202,7 +214,6 @@ RUN npm install
 
 COPY . .
 
-# Usar el usuario node en lugar de root
 USER node
 
 EXPOSE 4200
@@ -210,7 +221,6 @@ EXPOSE 4200
 CMD ["ng", "serve", "--host", "0.0.0.0", "--poll", "2000"]
 EOF
 
-    # docker-compose.yml
     cat > "$PROJECT_PATH/docker-compose.yml" << EOF
 services:
   app:
@@ -232,8 +242,7 @@ services:
     tty: true
 EOF
 
-    # .dockerignore
-    cat > "$PROJECT_PATH/.dockerignore" << EOF
+    cat > "$PROJECT_PATH/.dockerignore" << 'EOF'
 # node_modules  # Comentado para usar node_modules del repo local
 dist
 .angular
@@ -244,7 +253,6 @@ coverage
 e2e
 EOF
 
-    # Makefile
     cat > "$PROJECT_PATH/Makefile" << 'MAKEFILE'
 .PHONY: start up down logs shell ng npm npm-install build build-prod test test-headless share help
 
@@ -301,18 +309,17 @@ MAKEFILE
     echo -e "${GREEN}Archivos generados en: $PROJECT_PATH${NC}"
 }
 
-# Comando: vite (crear proyecto con Vite - interactivo)
+# ── Comando: vite ──────────────────────────────────────────────────────────────
 if [ "$1" = "vite" ]; then
     PROJECT_NAME="${2:-}"
 
     if [ -z "$PROJECT_NAME" ]; then
         echo -e "${RED}Error: Especifica nombre del proyecto${NC}"
         echo "Uso: $0 vite nombre-proyecto"
-        echo "Ejemplo: $0 vite mi-app"
         exit 1
     fi
 
-    echo -e "${GREEN}Creando proyecto con Vite...${NC}"
+    echo -e "${GREEN}Creando proyecto con Vite (node:lts-slim)...${NC}"
     echo -e "${YELLOW}Selecciona el framework y variante cuando se te pregunte${NC}"
     echo ""
 
@@ -323,7 +330,7 @@ if [ "$1" = "vite" ]; then
         -e NPM_CONFIG_UPDATE_NOTIFIER=false \
         -v "$(pwd)":/workspace \
         -w /workspace \
-        node:22-slim \
+        node:lts-slim \
         sh -c "npm create vite@latest $PROJECT_NAME"
 
     generate_vite_docker_files "$(pwd)/$PROJECT_NAME"
@@ -332,26 +339,32 @@ if [ "$1" = "vite" ]; then
     echo -e "${YELLOW}Proyecto Vite creado. Para iniciar:${NC}"
     echo "  cd $PROJECT_NAME"
     echo "  make start"
-    echo ""
     echo -e "${YELLOW}App disponible en: http://localhost:5173${NC}"
     exit 0
 fi
 
-# Comando: new (crear proyecto nuevo)
+# ── Comando: new ───────────────────────────────────────────────────────────────
 if [ "$1" = "new" ]; then
     PROJECT_NAME="${2:-}"
-    ANGULAR_VERSION="${3:-21}"
+    ANGULAR_VERSION="${3:-latest}"
 
     if [ -z "$PROJECT_NAME" ]; then
         echo -e "${RED}Error: Especifica nombre del proyecto${NC}"
         echo "Uso: $0 new nombre-proyecto [version]"
-        echo "Ejemplo: $0 new mi-app 21"
+        echo "Ejemplo: $0 new mi-app        # usa la última versión"
+        echo "Ejemplo: $0 new mi-app 18     # fuerza Angular 18"
         exit 1
+    fi
+
+    # Resolver "latest" → número de versión mayor
+    if [ "$ANGULAR_VERSION" = "latest" ]; then
+        ANGULAR_VERSION=$(resolve_latest_angular_version)
+        echo -e "${GREEN}Usando Angular $ANGULAR_VERSION (última disponible)${NC}"
     fi
 
     NODE_VERSION=$(get_node_version "$ANGULAR_VERSION")
 
-    echo -e "${GREEN}Creando proyecto Angular $ANGULAR_VERSION...${NC}"
+    echo -e "${GREEN}Creando proyecto Angular $ANGULAR_VERSION con Node $NODE_VERSION...${NC}"
 
     docker run --rm -it \
         --user "$(id -u):$(id -g)" \
@@ -364,9 +377,7 @@ if [ "$1" = "new" ]; then
         "node:$NODE_VERSION-slim" \
         sh -c "npm install -g @angular/cli@$ANGULAR_VERSION 2>/dev/null && /tmp/.npm-global/bin/ng new $PROJECT_NAME --skip-git"
 
-    # Configurar allowedHosts para Cloudflare Tunnel
     configure_allowed_hosts "$(pwd)/$PROJECT_NAME"
-
     generate_docker_files "$(pwd)/$PROJECT_NAME" "$ANGULAR_VERSION"
 
     echo ""
@@ -376,22 +387,25 @@ if [ "$1" = "new" ]; then
     exit 0
 fi
 
-# Comando: dockerizar proyecto existente
+# ── Dockerizar proyecto existente ──────────────────────────────────────────────
 PROJECT_PATH="${1:-.}"
 ANGULAR_VERSION="${2:-}"
 
 echo -e "${GREEN}Dockerizando proyecto Angular...${NC}"
 
-# Verificar que existe package.json
 if [ ! -f "$PROJECT_PATH/package.json" ]; then
     echo -e "${RED}Error: No se encontró package.json en $PROJECT_PATH${NC}"
     exit 1
 fi
 
-# Detectar versión de Angular si no se especificó
 if [ -z "$ANGULAR_VERSION" ]; then
-    ANGULAR_VERSION=$(grep -o '"@angular/core": *"[^"]*"' "$PROJECT_PATH/package.json" | grep -o '[0-9]*' | head -1)
-    echo -e "${YELLOW}Detectada versión de Angular: $ANGULAR_VERSION${NC}"
+    ANGULAR_VERSION=$(detect_angular_version_from_package "$PROJECT_PATH")
+    if [ -z "$ANGULAR_VERSION" ]; then
+        echo -e "${YELLOW}No se detectó versión Angular. Obteniendo la última...${NC}"
+        ANGULAR_VERSION=$(resolve_latest_angular_version)
+    else
+        echo -e "${YELLOW}Detectada versión de Angular: $ANGULAR_VERSION${NC}"
+    fi
 fi
 
 generate_docker_files "$PROJECT_PATH" "$ANGULAR_VERSION"

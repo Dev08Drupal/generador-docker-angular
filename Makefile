@@ -15,31 +15,59 @@ help: ## Muestra esta ayuda
 	@echo '$(YELLOW)Comandos disponibles:$(RESET)'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-15s$(RESET) %s\n", $$1, $$2}'
 
+# Obtiene la versión de Node compatible con la versión mayor de Angular
+# Angular ≤10→12, 11-12→14, 13-15→16, 16-17→20, 18-21→22, 22+→24
+# (Angular 22+ requiere Node 22.22.3+ que node:22-slim no garantiza; usar Node 24)
+define get_node
+$(if $(filter 8 9 10,$(1)),node:12-slim,\
+$(if $(filter 11 12,$(1)),node:14-slim,\
+$(if $(filter 13 14 15,$(1)),node:16-slim,\
+$(if $(filter 16 17,$(1)),node:20-slim,\
+$(if $(filter 18 19 20 21,$(1)),node:22-slim,\
+node:24-slim)))))
+endef
+
+# Resuelve "latest" → número de versión mayor consultando npm via Docker
+latest_ng_version = $(shell docker run --rm node:lts-slim npm view @angular/cli version 2>/dev/null | tr -d '\r' | tail -1 | cut -d. -f1)
+
 .PHONY: install
-install: ## Crea nuevo proyecto (uso: make install name=mi-app v=19)
-	@echo '$(GREEN)Creando proyecto Angular v$(v)...$(RESET)'
-	docker run --rm -it -v $(PWD):/workspace -w /workspace $(call get_node,$(v)) sh -c "npm install -g @angular/cli@$(v) && ng new $(name) --skip-git"
-	@$(MAKE) --no-print-directory setup-docker name=$(name) v=$(v)
+install: ## Crea nuevo proyecto (uso: make install name=mi-app [v=20] — omitir v= usa la última versión)
+	$(eval NG_V := $(if $(v),$(v),$(call latest_ng_version)))
+	@echo '$(GREEN)Creando proyecto Angular v$(NG_V)...$(RESET)'
+	docker run --rm -it \
+		--user "$$(id -u):$$(id -g)" \
+		-e HOME=/tmp \
+		-e NPM_CONFIG_PREFIX=/tmp/.npm-global \
+		-e NPM_CONFIG_FUND=false \
+		-e NPM_CONFIG_UPDATE_NOTIFIER=false \
+		-v $(PWD):/workspace -w /workspace \
+		$(call get_node,$(NG_V)) \
+		sh -c "npm install -g @angular/cli@$(NG_V) 2>/dev/null && /tmp/.npm-global/bin/ng new $(name) --skip-git"
+	@$(MAKE) --no-print-directory setup-docker name=$(name) v=$(NG_V)
 	@echo '$(YELLOW)Proyecto creado en: ./$(name)$(RESET)'
 	@echo '$(YELLOW)Entra al proyecto y ejecuta: make start$(RESET)'
 
 .PHONY: init
-init: ## Inicializa en directorio actual (uso: make init v=19)
-	@echo '$(GREEN)Inicializando proyecto Angular v$(v)...$(RESET)'
-	docker run --rm -it -v $(PWD):/app -w /app $(call get_node,$(v)) sh -c "npm install -g @angular/cli@$(v) && ng new temp-app --skip-git && mv temp-app/* temp-app/.* . 2>/dev/null; rm -rf temp-app"
+init: ## Inicializa Angular en el directorio actual (uso: make init [v=20] — omitir v= usa la última versión)
+	$(eval NG_V := $(if $(v),$(v),$(call latest_ng_version)))
+	@echo '$(GREEN)Inicializando proyecto Angular v$(NG_V)...$(RESET)'
+	docker run --rm -it \
+		--user "$$(id -u):$$(id -g)" \
+		-e HOME=/tmp \
+		-e NPM_CONFIG_PREFIX=/tmp/.npm-global \
+		-e NPM_CONFIG_FUND=false \
+		-e NPM_CONFIG_UPDATE_NOTIFIER=false \
+		-v $(PWD):/app -w /app \
+		$(call get_node,$(NG_V)) \
+		sh -c "npm install -g @angular/cli@$(NG_V) 2>/dev/null && /tmp/.npm-global/bin/ng new temp-app --skip-git && mv temp-app/* temp-app/.* . 2>/dev/null; rm -rf temp-app"
 	@echo '$(YELLOW)Proyecto inicializado. Ejecuta: make start$(RESET)'
 
-# Función para obtener versión de Node según Angular
-# Angular 8: Node 12, Angular 17: Node 20, Angular 18-21: Node 22
-define get_node
-$(if $(filter 8 9 10,$(1)),node:12-slim,$(if $(filter 11 12,$(1)),node:14-slim,$(if $(filter 13 14 15,$(1)),node:16-slim,$(if $(filter 16 17,$(1)),node:20-slim,node:22-slim))))
-endef
-
 .PHONY: setup-docker
-setup-docker: ## Genera archivos Docker para un proyecto existente (uso: make setup-docker name=mi-app v=17)
-	@echo '$(GREEN)Generando archivos Docker para $(name) con Angular $(v)...$(RESET)'
+setup-docker: ## Genera archivos Docker para un proyecto existente (uso: make setup-docker name=mi-app v=20)
+	$(eval NG_V := $(if $(v),$(v),$(call latest_ng_version)))
+	@echo '$(GREEN)Generando archivos Docker para $(name) con Angular $(NG_V)...$(RESET)'
 	@mkdir -p $(name)
-	@printf '# Dockerfile - Angular $(v)\nFROM $(call get_node,$(v))\n\n# Instalar Chromium para pruebas unitarias y cloudflared para tunnels\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n    chromium \\\n    curl \\\n    ca-certificates && \\\n    curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && \\\n    chmod +x /usr/local/bin/cloudflared && \\\n    apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*\n\nENV CHROME_BIN=/usr/bin/chromium\n\nRUN npm install -g @angular/cli@$(v)\n\n# Crear usuario con UID/GID configurables (por defecto 1000)\nARG UID=1000\nARG GID=1000\n\nRUN if [ "$$GID" != "1000" ]; then groupmod -g $$GID node 2>/dev/null || true; fi && \\\n    if [ "$$UID" != "1000" ]; then usermod -u $$UID node 2>/dev/null || true; fi\n\nWORKDIR /app\n\n# Cambiar propietario del directorio de trabajo\nRUN chown -R node:node /app\n\nCOPY package*.json ./\nRUN npm install\n\nCOPY . .\n\n# Usar el usuario node en lugar de root\nUSER node\n\nEXPOSE 4200\n\nCMD ["ng", "serve", "--host", "0.0.0.0", "--poll", "2000"]\n' > $(name)/Dockerfile
+	@printf '# Dockerfile - Angular $(NG_V)\nFROM $(call get_node,$(NG_V))\n\n# Instalar Chromium para pruebas unitarias y cloudflared para tunnels\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n    chromium \\\n    curl \\\n    ca-certificates && \\\n    curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && \\\n    chmod +x /usr/local/bin/cloudflared && \\\n    apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*\n\nENV CHROME_BIN=/usr/bin/chromium\n\nRUN npm install -g @angular/cli@$(NG_V)\n\nARG UID=1000\nARG GID=1000\n\nRUN if [ "$$GID" != "1000" ]; then groupmod -g $$GID node 2>/dev/null || true; fi && \\\n    if [ "$$UID" != "1000" ]; then usermod -u $$UID node 2>/dev/null || true; fi\n\nWORKDIR /app\nRUN chown -R node:node /app\n\nCOPY package*.json ./\nRUN npm install\n\nCOPY . .\n\nUSER node\n\nEXPOSE 4200\n\nCMD ["ng", "serve", "--host", "0.0.0.0", "--poll", "2000"]\n' > $(name)/Dockerfile
 	@printf 'services:\n  app:\n    build:\n      context: .\n      args:\n        UID: $${UID:-1000}\n        GID: $${GID:-1000}\n    container_name: $(name)\n    mem_limit: 4g\n    ports:\n      - "$${PORT:-4200}:4200"\n    volumes:\n      - .:/app\n    environment:\n      - NG_CLI_ANALYTICS=false\n    command: ng serve --host 0.0.0.0 --poll 2000\n    stdin_open: true\n    tty: true\n' > $(name)/docker-compose.yml
 	@printf '# node_modules  # Comentado para usar node_modules del repo local\ndist\n.angular\n.git\n.vscode\n.idea\ncoverage\ne2e\n' > $(name)/.dockerignore
 	@cp Makefile $(name)/Makefile 2>/dev/null || true

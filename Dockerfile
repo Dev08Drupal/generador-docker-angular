@@ -1,5 +1,5 @@
-# Dockerfile - Angular 21
-FROM node:22-slim
+# Dockerfile - plantilla base (la imagen real se genera por dockerize.sh / Makefile)
+FROM node:lts-slim
 
 # Instalar Chromium para pruebas unitarias y cloudflared para tunnels
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV CHROME_BIN=/usr/bin/chromium
 
-RUN npm install -g @angular/cli@21
+RUN npm install -g @angular/cli@latest
 
 # Crear usuario con UID/GID configurables (por defecto 1000)
 ARG UID=1000

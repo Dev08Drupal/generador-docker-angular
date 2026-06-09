@@ -10,40 +10,43 @@ Entorno de desarrollo Angular completamente dockerizado. No requiere instalar No
 
 ## Instalación Global (Recomendado)
 
-Para usar el comando `ng-docker` desde cualquier ubicación, debes crear un enlace simbólico:
+Para usar el comando `ng-docker` desde cualquier ubicación, crea un enlace simbólico:
 
 ```bash
-# Desde la carpeta del proyecto generador-docker-angular ejecuta:
 cd /ruta/a/generador-docker-angular
 sudo ln -s $(pwd)/dockerize.sh /usr/local/bin/ng-docker
 
 # Ahora puedes usarlo desde cualquier carpeta:
-ng-docker new mi-proyecto 21
-ng-docker /ruta/a/proyecto-existente
+ng-docker new mi-proyecto
 ```
 
-> **Nota:** El enlace simbólico solo se crea una vez. Después podrás usar `ng-docker` desde cualquier directorio.
+> El enlace simbólico solo se crea una vez.
 
 ## Inicio Rápido
 
-### Opción 1: Usando el script (desde cualquier lugar)
+### Opción 1: Script (desde cualquier lugar)
 
 ```bash
-# Crear proyecto nuevo
-ng-docker new mi-app 21
+# Crear proyecto con la última versión de Angular (recomendado)
+ng-docker new mi-app
+
+# Crear proyecto con versión específica
+ng-docker new mi-app 18
 
 # Dockerizar proyecto existente
 ng-docker /ruta/a/mi-proyecto
 ```
 
-### Opción 2: Usando Make (desde esta carpeta)
+### Opción 2: Make (desde esta carpeta)
 
 ```bash
-# Crear proyecto en directorio actual
-make init v=21
+# Última versión de Angular (detecta automáticamente)
+make install name=mi-app
+make init
 
-# Crear proyecto en subdirectorio
-make install name=mi-app v=21
+# Versión específica
+make install name=mi-app v=18
+make init v=18
 ```
 
 ### Levantar el proyecto
@@ -56,27 +59,39 @@ make start
 http://localhost:4200
 ```
 
+## Detección automática de versiones
+
+Cuando no se especifica versión, `ng-docker` consulta automáticamente el registro de npm para obtener la **última versión estable de Angular CLI** al momento de ejecutar el comando, y selecciona la imagen de Node.js compatible.
+
+```bash
+ng-docker new mi-app
+# → Consultando última versión de Angular CLI en npm...
+# → Usando Angular 22 (última disponible)
+# → Creando proyecto Angular 22 con Node 24...
+```
+
+No es necesario saber qué versión usar; el generador lo resuelve por ti.
+
 ## Uso del Script ng-docker
 
 ### Crear proyecto nuevo (Angular CLI)
 
 ```bash
-# Sintaxis: ng-docker new <nombre> <version>
-ng-docker new mi-app 21        # Angular 21 (LTS actual)
-ng-docker new legacy-app 8     # Angular 8
-ng-docker new otro-proyecto 17 # Angular 17
+# Última versión (recomendado)
+ng-docker new mi-app
+
+# Versión específica
+ng-docker new legacy-app 8
+ng-docker new otro-proyecto 17
 ```
 
 ### Crear proyecto con Vite (interactivo)
 
 ```bash
-# Sintaxis: ng-docker vite <nombre>
 ng-docker vite mi-app
 ```
 
-Esto ejecuta `npm create vite@latest` de forma interactiva. Podrás elegir:
-- **Framework**: Vanilla, Vue, React, Svelte, etc.
-- **Variante**: JavaScript o TypeScript
+Ejecuta `npm create vite@latest` de forma interactiva. Puedes elegir framework (Vanilla, Vue, React, Svelte…) y variante (JavaScript o TypeScript).
 
 | Característica | `ng-docker new` | `ng-docker vite` |
 |----------------|-----------------|------------------|
@@ -101,6 +116,25 @@ El script genera automáticamente:
 - `.dockerignore`
 - `Makefile`
 
+## Compatibilidad de Versiones
+
+| Angular | Node | Imagen Docker | Notas |
+|---------|------|---------------|-------|
+| 8–10 | 12 | `node:12-slim` | |
+| 11–12 | 14 | `node:14-slim` | |
+| 13–15 | 16 | `node:16-slim` | |
+| 16–17 | 20 | `node:20-slim` | |
+| 18–21 | 22 | `node:22-slim` | |
+| 22+ | 24 | `node:24-slim` | Ver nota abajo |
+
+> **Angular 22+ requiere Node 24:** Angular 22 exige Node v22.22.3 como mínimo, pero la imagen `node:22-slim` disponible en Docker Hub trae v22.22.0. Para evitar este error se usa `node:24-slim`, que supera ese requisito holgadamente.
+>
+> Síntoma del error:
+> ```
+> Node.js version v22.22.0 detected.
+> The Angular CLI requires a minimum Node.js version of v22.22.3 or v24.15.0 or v26.0.0.
+> ```
+
 ## Características del Entorno Docker
 
 ### Imagen base Debian Slim
@@ -109,10 +143,9 @@ Se usa `node:XX-slim` (Debian) en lugar de Alpine para compatibilidad con Chromi
 
 ### Usuario no-root
 
-El contenedor ejecuta como usuario `node` en lugar de `root` para mayor seguridad. El UID/GID es configurable:
+El contenedor ejecuta como usuario `node` en lugar de `root`. El UID/GID es configurable:
 
 ```bash
-# Usar UID/GID personalizados (útil para evitar problemas de permisos)
 UID=1001 GID=1001 make start
 ```
 
@@ -121,53 +154,29 @@ UID=1001 GID=1001 make start
 Los `node_modules` se comparten entre el host y el contenedor mediante el volumen montado. Esto permite que tu IDE tenga acceso completo a las dependencias para autocompletado e IntelliSense.
 
 ```bash
-# Instalar dependencias en node_modules local
 make npm-install
 ```
 
 ### Tests Headless con Chromium
 
-Chromium viene preinstalado en el contenedor para ejecutar tests unitarios en modo headless sin necesidad de un navegador gráfico.
+Chromium viene preinstalado para ejecutar tests unitarios en modo headless.
 
 ```bash
-# Tests en watch mode (headless)
-make test
-
-# Tests una sola vez - ideal para CI
-make test-headless
+make test           # watch mode
+make test-headless  # una sola vez (CI)
 ```
 
 ### Límite de memoria
 
-Cada contenedor tiene un límite de 4GB de RAM configurado por defecto en `docker-compose.yml`.
+Cada contenedor tiene un límite de 4 GB de RAM configurado en `docker-compose.yml`.
 
 ## Múltiples Proyectos Simultáneos
 
-Cada proyecto puede correr en un puerto diferente:
-
 ```bash
-# Terminal 1 - Puerto 4200 (default)
-cd proyecto-angular-21
-make start
-
-# Terminal 2 - Puerto 4201
-cd proyecto-angular-17
-PORT=4201 make start
-
-# Terminal 3 - Puerto 4202
-cd proyecto-legacy-8
-PORT=4202 make start
+cd proyecto-a && make start          # puerto 4200
+cd proyecto-b && PORT=4201 make start
+cd proyecto-c && PORT=4202 make start
 ```
-
-## Compatibilidad de Versiones
-
-| Angular | Node | Imagen Base | Ejemplo |
-|---------|------|-------------|---------|
-| 8-10 | 12 | node:12-slim | `ng-docker new app 8` |
-| 11-12 | 14 | node:14-slim | `ng-docker new app 12` |
-| 13-15 | 16 | node:16-slim | `ng-docker new app 15` |
-| 16-17 | 20 | node:20-slim | `ng-docker new app 17` |
-| 18-21 | 22 | node:22-slim | `ng-docker new app 21` |
 
 ## Comandos Make (dentro del proyecto)
 
@@ -185,27 +194,17 @@ PORT=4202 make start
 ### Angular CLI
 
 ```bash
-# Generar componente
 make ng cmd="generate component home"
-
-# Generar servicio
 make ng cmd="generate service api"
-
-# Cualquier comando ng
 make ng cmd="add @angular/material"
 ```
 
 ### NPM
 
 ```bash
-# Instalar dependencia
 make npm cmd="install axios"
-
-# Instalar dev dependency
 make npm cmd="install -D prettier"
-
-# Instalar dependencias en node_modules local
-make npm-install
+make npm-install   # instala en node_modules local
 ```
 
 ### Build y Test
@@ -220,31 +219,28 @@ make npm-install
 ## Ejemplo Completo
 
 ```bash
-# 1. Crear proyecto desde cualquier carpeta
+# 1. Crear proyecto (detecta la última versión de Angular automáticamente)
 cd ~/proyectos
-ng-docker new mi-tienda 21
+ng-docker new mi-tienda
 
 # 2. Entrar y levantar
 cd mi-tienda
 make start
 
-# 3. Desarrollar (hot reload automático)
-# Edita archivos en src/
-
-# 4. Crear componentes
+# 3. Crear componentes y servicios
 make ng cmd="generate component header"
 make ng cmd="generate service products"
 
-# 5. Instalar librerías
+# 4. Instalar librerías
 make npm cmd="install @angular/material"
 
-# 6. Ejecutar tests
+# 5. Ejecutar tests
 make test
 
-# 7. Build de producción
+# 6. Build de producción
 make build-prod
 
-# 8. Detener
+# 7. Detener
 make down
 ```
 
@@ -254,43 +250,32 @@ make down
 mi-proyecto/
 ├── Dockerfile          # Node + Angular CLI + Chromium
 ├── docker-compose.yml  # Configuración del contenedor
-├── Makefile           # Comandos simplificados
-├── .dockerignore      # Exclusiones para Docker
-├── src/               # Código Angular
+├── Makefile            # Comandos simplificados
+├── .dockerignore       # Exclusiones para Docker
+├── src/                # Código Angular
 ├── package.json
-└── angular.json
+└── angular.json        # Con allowedHosts para Cloudflare Tunnel
 ```
 
 ## Compartir tu localhost (Cloudflare Tunnel)
 
-Comparte tu proyecto local con cualquier persona en segundos, con una URL pública HTTPS. Sin registro ni costo.
-
-`cloudflared` viene incluido en el contenedor Docker, no necesitas instalar nada adicional.
-
-### Uso
+`cloudflared` viene incluido en el contenedor. No necesitas instalar nada adicional.
 
 ```bash
-# Asegúrate de tener el proyecto corriendo
-make start
-
-# En otra terminal, comparte tu localhost
-make share
+make start   # proyecto corriendo
+make share   # obtén una URL pública HTTPS
 ```
 
-Obtendrás una URL como `https://random-name.trycloudflare.com` que puedes compartir.
-
-### Compartir en puerto diferente
+Obtendrás una URL como `https://random-name.trycloudflare.com`.
 
 ```bash
-# Si tu proyecto corre en otro puerto
+# Puerto diferente
 make share port=4201
 ```
 
 ### Configuración de allowedHosts
 
-Los proyectos creados con `ng-docker` ya vienen configurados para funcionar con Cloudflare Tunnel.
-
-Si tienes un proyecto existente y ves el error `"Blocked request. This host is not allowed"`, agrega esta configuración en tu `angular.json`:
+Los proyectos creados con `ng-docker` ya vienen preconfigurados para funcionar con Cloudflare Tunnel. Si tienes un proyecto existente y ves el error `"Blocked request. This host is not allowed"`, agrega esto en `angular.json`:
 
 ```json
 {
@@ -303,19 +288,17 @@ Si tienes un proyecto existente y ves el error `"Blocked request. This host is n
 }
 ```
 
-Luego reinicia el contenedor:
+Luego reinicia:
 
 ```bash
-make down
-make start
+make down && make start
 ```
 
 ## Notas
 
 - Hot reload funciona automáticamente
 - `node_modules` se comparte con el host (autocompletado en IDE)
-- No necesitas Node.js instalado en WSL2
-- Cada proyecto es independiente con su propia versión
+- No necesitas Node.js instalado en tu sistema
+- Cada proyecto es independiente con su propia versión de Angular y Node
 - El contenedor ejecuta como usuario no-root por seguridad
-- Límite de 4GB de RAM por contenedor
-- Usa `make share` para compartir tu localhost con una URL pública
+- Límite de 4 GB de RAM por contenedor
